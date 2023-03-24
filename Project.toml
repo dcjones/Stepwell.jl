@@ -1,0 +1,12 @@
+name = "Stepwell"
+uuid = "bd3bd667-9a11-4d6e-8e52-133993790485"
+authors = ["Daniel C. Jones <djones3@fredhutch.org>"]
+version = "0.1.0"
+
+[deps]
+Deldir = "64db5801-a3ae-51a7-b7d2-a0a5f0813e47"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
+LinearSolvePardiso = "a6722589-28b8-4472-944e-bde9ee6da670"
+Muon = "446846d7-b4ce-489d-bf74-72da18fe3629"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
