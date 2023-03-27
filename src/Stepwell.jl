@@ -46,7 +46,7 @@ function expected_absorption_time(
     sink_count = sum(absorbing_states)
 
     if sink_count == 0
-        error("No asborbing state cells.")
+        return fill(Inf32, ncells)
     end
 
     transient_states = .!absorbing_states
@@ -85,8 +85,8 @@ function expected_absorption_time(
 
         if !absorbing_states[j]
             k += 1
-            from[k] = i
-            to[k] = j
+            from[k] = j
+            to[k] = i
             weight[k] = 1/degree[j]
         end
     end
