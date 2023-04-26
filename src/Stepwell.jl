@@ -1,15 +1,16 @@
 module Stepwell
 
-using Muon
 using Deldir: deldir
+using LinearAlgebra: I
 using LinearSolve
 using LinearSolvePardiso
-using LinearAlgebra: I
-using SparseArrays
+using Muon
+using ProgressMeter
 using Random: shuffle!
+using SparseArrays
 using Statistics: mean
 
-export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time
+export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time, local_shuffled_expected_absorption_time
 
 
 const default_solver = MKLPardisoFactorize
@@ -18,6 +19,7 @@ struct CellularNeighborhoodGraph
     adata::AnnData
     senders::Vector{Int}
     receivers::Vector{Int}
+    A::SparseMatrixCSC{UInt8,Int}
 end
 
 
@@ -38,9 +40,25 @@ function CellularNeighborhoodGraph(adata::AnnData)
     ys .-= ymin
     ys ./= ymax - ymin
 
+    println("Computing Delaunay triangulation...")
     del, vor, summ = deldir(xs, ys)
+    println("Done.")
 
-    return CellularNeighborhoodGraph(adata, del.ind1, del.ind2)
+    A = adjacency_matrix(size(adata, 1), del.ind1, del.ind2)
+
+    return CellularNeighborhoodGraph(adata, del.ind1, del.ind2, A)
+end
+
+
+"""
+Build sparse adjacency matrix from edges.
+"""
+function adjacency_matrix(ncells::Int, senders::Vector{T}, receivers::Vector{T}) where {T<:Integer}
+    @assert length(senders) == length(receivers)
+    nedges = length(senders)
+    A = sparse(senders, receivers, fill(0x1, nedges), ncells, ncells)
+    A += A'
+    return A
 end
 
 
@@ -79,7 +97,7 @@ shuffling edges, preserving in- and out-degree.
 """
 function edge_shuffled_expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
-        niter::Int=500)
+        niter::Int=100)
 
     shuffled_senders = copy(G.senders)
     shuffled_receivers = copy(G.receivers)
@@ -97,12 +115,56 @@ end
 
 
 """
+Send every node on a `k`-step random walk with transition probailities `P`.
+"""
+function random_walk!(A::SparseMatrixCSC, destination::Vector{Int}, k::Int)
+    @assert size(A, 1) == size(A, 2)
+    n = size(A, 1)
+    # Threads.@threads for i in 1:n
+    for i in 1:n
+        destination[i] = i
+        for step in 1:k
+            A.colptr[destination[i]] == A.colptr[destination[i]+1] && continue
+            j = rand(A.colptr[destination[i]]:A.colptr[destination[i]+1]-1)
+            destination[i] = A.rowval[j]
+        end
+    end
+end
+
+
+
+"""
+Do a local shuffle by sending nodes on a k-step random walk.
+"""
+function local_shuffled_expected_absorption_time(
+        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
+        niter::Int=200, k::Int=20)
+
+    ncells = size(G.adata, 1)
+    destinations = zeros(Int, ncells)
+
+    eat = expected_absorption_time(G, absorbing_states)
+    shuffled_eat = zeros(Float32, ncells)
+
+    for iter in 1:niter
+        random_walk!(G.A, destinations, k+1)
+        shuffled_eat .+= eat[destinations] .+ 1
+    end
+    shuffled_eat ./= niter
+    println("Done.")
+
+    return shuffled_eat
+end
+
+
+
+"""
 Compute the overall expected absorption time for transcient nodes in a null
 model formed by shuffling node labels.
 """
 function shuffled_expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
-        niter::Int=500)
+        niter::Int=100)
 
     ncells = size(G.adata, 1)
     shuffled_absorbing_states = copy(absorbing_states)
@@ -128,7 +190,7 @@ end
 
 function expected_absorption_time(
         ncells::Int, senders::Vector{Int}, receivers::Vector{Int}, absorbing_states::AbstractVector{Bool};
-        solver=default_solver())
+        solver=nothing)
     sink_count = sum(absorbing_states)
 
     if sink_count == 0
@@ -139,10 +201,8 @@ function expected_absorption_time(
     transient = (1:ncells)[transient_states]
 
     # Some solvers work only with Float64
-    # T = Float32
-    T = Float64
-
-    P = zeros(T, (ncells, ncells)) # transition probabilities
+    T = Float32
+    # T = Float64
 
     # count used edges
     nedges = 0
