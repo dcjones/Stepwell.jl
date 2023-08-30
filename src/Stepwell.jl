@@ -1,6 +1,7 @@
 module Stepwell
 
-using Deldir: deldir
+#using Deldir: deldir
+using DelaunayTriangulation
 using LinearAlgebra: I
 using LinearSolve
 using LinearSolvePardiso
@@ -13,7 +14,7 @@ using Statistics: mean
 export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time, local_shuffled_expected_absorption_time
 
 
-const default_solver = MKLPardisoFactorize
+const default_solver = LinearSolve.UMFPACKFactorization
 
 struct CellularNeighborhoodGraph
     adata::AnnData
@@ -41,12 +42,21 @@ function CellularNeighborhoodGraph(adata::AnnData)
     ys ./= ymax - ymin
 
     println("Computing Delaunay triangulation...")
-    del, vor, summ = deldir(xs, ys)
+    tri = triangulate(collect(zip(xs, ys)))
+    delgraph = get_graph(tri)
+    ind1 = Int[]
+    ind2 = Int[]
+    for (i, j) in get_edges(delgraph)
+        if i != j && i > 0 && j > 0
+            push!(ind1, i)
+            push!(ind2, j)
+        end
+    end
     println("Done.")
 
-    A = adjacency_matrix(size(adata, 1), del.ind1, del.ind2)
+    A = adjacency_matrix(size(adata, 1), ind1, ind2)
 
-    return CellularNeighborhoodGraph(adata, del.ind1, del.ind2, A)
+    return CellularNeighborhoodGraph(adata, ind1, ind2, A)
 end
 
 
@@ -182,9 +192,9 @@ end
 Compute the expected absorption time for every node.
 """
 function expected_absorption_time(
-        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool})
+        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool}; solver=nothing)
 
-    return expected_absorption_time(size(G.adata, 1), G.senders, G.receivers, absorbing_states)
+    return expected_absorption_time(size(G.adata, 1), G.senders, G.receivers, absorbing_states, solver=solver)
 end
 
 
@@ -201,8 +211,8 @@ function expected_absorption_time(
     transient = (1:ncells)[transient_states]
 
     # Some solvers work only with Float64
-    T = Float32
-    # T = Float64
+    #T = Float32
+    T = Float64
 
     # count used edges
     nedges = 0
@@ -246,9 +256,9 @@ function expected_absorption_time(
 
     linprob = LinearProblem(I - Q, ones(T, size(Q, 1)))
     if solver === nothing
-        E = solve(linprob)
+        E = solve(linprob, default_solver())
     else
-        E = solve(linprob, solver)
+        E = solve(linprob, solver())
     end
 
     Efull = zeros(Float32, ncells)
