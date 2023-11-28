@@ -17,7 +17,7 @@ export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_ab
 const default_solver = LinearSolve.UMFPACKFactorization
 
 struct CellularNeighborhoodGraph
-    adata::AnnData
+    ncells::Int
     senders::Vector{Int}
     receivers::Vector{Int}
     A::SparseMatrixCSC{UInt8,Int}
@@ -32,11 +32,20 @@ function CellularNeighborhoodGraph(adata::AnnData)
     xys = adata.obsm["spatial"]
 
     xs = Vector{Float64}(xys[:,1])
+    ys = Vector{Float64}(xys[:,2])
+
+    return CellularNeighborhoodGraph(xs, ys)
+end
+
+
+function CellularNeighborhoodGraph(xs::Vector{Float64}, ys::Vector{Float64})
+    @assert length(xs) == length(ys)
+    n = length(xs)
+
     xmin, xmax = extrema(xs)
     xs .-= xmin
     xs ./= xmax - xmin
 
-    ys = Vector{Float64}(xys[:,2])
     ymin, ymax = extrema(ys)
     ys .-= ymin
     ys ./= ymax - ymin
@@ -54,9 +63,9 @@ function CellularNeighborhoodGraph(adata::AnnData)
     end
     println("Done.")
 
-    A = adjacency_matrix(size(adata, 1), ind1, ind2)
+    A = adjacency_matrix(n, ind1, ind2)
 
-    return CellularNeighborhoodGraph(adata, ind1, ind2, A)
+    return CellularNeighborhoodGraph(n, ind1, ind2, A)
 end
 
 
@@ -111,12 +120,11 @@ function edge_shuffled_expected_absorption_time(
 
     shuffled_senders = copy(G.senders)
     shuffled_receivers = copy(G.receivers)
-    ncells = size(G.adata, 1)
 
-    E = zeros(Float32, ncells)
+    E = zeros(Float32, G.ncells)
     for i in 1:niter
         rewire_graph!(shuffled_senders, shuffled_receivers)
-        E .+= expected_absorption_time(ncells, shuffled_senders, shuffled_receivers, absorbing_states)
+        E .+= expected_absorption_time(G.ncells, shuffled_senders, shuffled_receivers, absorbing_states)
     end
     E ./= niter
 
@@ -150,11 +158,10 @@ function local_shuffled_expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
         niter::Int=200, k::Int=20)
 
-    ncells = size(G.adata, 1)
-    destinations = zeros(Int, ncells)
+    destinations = zeros(Int, G.ncells)
 
     eat = expected_absorption_time(G, absorbing_states)
-    shuffled_eat = zeros(Float32, ncells)
+    shuffled_eat = zeros(Float32, G.ncells)
 
     for iter in 1:niter
         random_walk!(G.A, destinations, k+1)
@@ -176,12 +183,11 @@ function shuffled_expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
         niter::Int=100)
 
-    ncells = size(G.adata, 1)
     shuffled_absorbing_states = copy(absorbing_states)
     E = 0.0
     for i in 1:niter
         shuffle!(shuffled_absorbing_states)
-        E += mean(expected_absorption_time(ncells, G.senders, G.receivers, shuffled_absorbing_states)[.!shuffled_absorbing_states])
+        E += mean(expected_absorption_time(G.ncells, G.senders, G.receivers, shuffled_absorbing_states)[.!shuffled_absorbing_states])
     end
 
     return E / niter
@@ -194,7 +200,7 @@ Compute the expected absorption time for every node.
 function expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool}; solver=nothing)
 
-    return expected_absorption_time(size(G.adata, 1), G.senders, G.receivers, absorbing_states, solver=solver)
+    return expected_absorption_time(G.ncells, G.senders, G.receivers, absorbing_states, solver=solver)
 end
 
 
