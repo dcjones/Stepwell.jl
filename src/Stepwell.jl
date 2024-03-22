@@ -11,7 +11,7 @@ using Random: shuffle!
 using SparseArrays
 using Statistics: mean
 
-export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time, local_shuffled_expected_absorption_time
+export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time, local_shuffled_expected_absorption_time, normalized_expected_absorption_time
 
 
 const default_solver = LinearSolve.UMFPACKFactorization
@@ -21,6 +21,10 @@ struct CellularNeighborhoodGraph
     senders::Vector{Int}
     receivers::Vector{Int}
     A::SparseMatrixCSC{UInt8,Int}
+end
+
+function Base.show(io::IO, G::CellularNeighborhoodGraph)
+    println(io, typeof(G), "(ncells=", G.ncells, ", senders=…, receivers=…, A=…)")
 end
 
 
@@ -193,6 +197,24 @@ function shuffled_expected_absorption_time(
     return E / niter
 end
 
+
+"""
+Compute expected absorption time relative to absorption time after a local shuffle, thus
+normalizing for the local cell type composition.
+"""
+function normalized_expected_absorption_time(
+        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
+        niter::Int=200, k::Int=100, solver=nothing)
+
+    eat = expected_absorption_time(G, absorbing_states, solver=solver)
+    shuffled_eat = local_shuffled_expected_absorption_time(G, absorbing_states, niter=niter, k=k, solver=solver)
+    normalized_eat = eat ./ shuffled_eat
+
+    # essentially defininig 0/0 = 1 for the purposes of normalization
+    normalized_eat[eat .== 0] .= 1.0
+
+    return normalized_eat
+end
 
 """
 Compute the expected absorption time for every node.
