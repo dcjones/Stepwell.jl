@@ -156,7 +156,7 @@ Do a local shuffle by sending nodes on a k-step random walk.
 """
 function local_shuffled_expected_absorption_time(
         G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool};
-        niter::Int=200, k::Int=20, solver=nothing)
+        niter::Int=200, k::Int=100, solver=nothing)
 
     destinations = zeros(Int, G.ncells)
 
