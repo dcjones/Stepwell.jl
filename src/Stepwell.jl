@@ -11,7 +11,9 @@ using Random: shuffle!
 using SparseArrays
 using Statistics: mean
 
-export CellularNeighborhoodGraph, expected_absorption_time, shuffled_expected_absorption_time, local_shuffled_expected_absorption_time, normalized_expected_absorption_time
+export CellularNeighborhoodGraph, expected_absorption_time,
+    shuffled_expected_absorption_time, local_shuffled_expected_absorption_time,
+    normalized_expected_absorption_time, expected_roundtrip_time
 
 
 const default_solver = LinearSolve.UMFPACKFactorization
@@ -154,7 +156,6 @@ function random_walk!(A::SparseMatrixCSC, destination::Vector{Int}, k::Int)
 end
 
 
-
 """
 Do a local shuffle by sending nodes on a k-step random walk.
 """
@@ -176,7 +177,6 @@ function local_shuffled_expected_absorption_time(
 
     return shuffled_eat
 end
-
 
 
 """
@@ -216,27 +216,13 @@ function normalized_expected_absorption_time(
     return normalized_eat
 end
 
-"""
-Compute the expected absorption time for every node.
-"""
-function expected_absorption_time(
-        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool}; solver=nothing)
 
-    return expected_absorption_time(G.ncells, G.senders, G.receivers, absorbing_states, solver=solver)
-end
-
-
-function expected_absorption_time(
-        ncells::Int, senders::Vector{Int}, receivers::Vector{Int}, absorbing_states::AbstractVector{Bool};
-        solver=nothing)
-    sink_count = sum(absorbing_states)
-
-    if sink_count == 0
-        return fill(Inf32, ncells)
-    end
+function transition_matrices(
+        ncells::Int, senders::Vector{Int}, receivers::Vector{Int}, absorbing_states::AbstractVector{Bool})
 
     transient_states = .!absorbing_states
     transient = (1:ncells)[transient_states]
+    absorbing = (1:ncells)[absorbing_states]
 
     # Some solvers work only with Float64
     #T = Float32
@@ -280,19 +266,98 @@ function expected_absorption_time(
     end
     @assert k == nedges
     P = sparse(from, to, weight, ncells, ncells)
-    Q = P[transient,transient]
 
-    linprob = LinearProblem(I - Q, ones(T, size(Q, 1)))
+    Q = P[transient, transient]
+    R = P[transient, absorbing]
+
+    return (Q, R, transient, absorbing)
+end
+
+
+"""
+Compute the expected absorption time for every node.
+"""
+function expected_absorption_time(
+        G::CellularNeighborhoodGraph, absorbing_states::AbstractVector{Bool}; solver=nothing)
+
+    return expected_absorption_time(G.ncells, G.senders, G.receivers, absorbing_states, solver=solver)
+end
+
+
+function expected_absorption_time(
+        ncells::Int, senders::Vector{Int}, receivers::Vector{Int}, absorbing_states::AbstractVector{Bool};
+        solver=nothing)
+    sink_count = sum(absorbing_states)
+
+    if sink_count == 0
+        return fill(Inf32, ncells)
+    end
+
+    Q, R, transient, asborbing = transition_matrices(ncells, senders, receivers, absorbing_states)
+    E = expected_absorption_time_from_q(Q, solver=solver)
+
+    Efull = zeros(Float32, ncells)
+    Efull[transient] .= E
+
+    return Efull
+end
+
+
+function expected_absorption_time_from_q(
+        Q::SparseMatrixCSC; solver=nothing)
+
+    linprob = LinearProblem(I - Q, ones(Float64, size(Q, 1)))
     if solver === nothing
         E = solve(linprob, default_solver())
     else
         E = solve(linprob, solver())
     end
 
-    Efull = zeros(Float32, ncells)
-    Efull[transient] .= E
+    return E.u
+end
 
-    return Efull
+
+function expected_roundtrip_time(
+        G::CellularNeighborhoodGraph, origin_states::AbstractVector{Bool},
+        destination_states::AbstractVector{Bool}; solver=nothing)
+    return expected_roundtrip_time(G.ncells, G.senders, G.receivers, origin_states, destination_states, solver=solver)
+end
+
+
+function expected_roundtrip_time(
+        ncells::Int, senders::Vector{Int}, receivers::Vector{Int}, origin_states::AbstractVector{Bool}, destination_states::AbstractVector{Bool};
+        solver=nothing)
+
+    n_origin_states = sum(origin_states)
+    n_destination_states = sum(destination_states)
+
+    if n_origin_states == 0
+        return zeros(Float32, 0)
+    end
+
+    if n_destination_states == 0
+        return fill(Inf32, n_origin_states)
+    end
+
+    Qab, Rab = transition_matrices(ncells, senders, receivers, destination_states)
+    Qba, Rba = transition_matrices(ncells, senders, receivers, origin_states)
+
+    tba = expected_absorption_time_from_q(Qba, solver=solver)
+
+    non_dest_origin_mask = origin_states[.!destination_states]
+    non_orig_dest_mask = destination_states[.!origin_states]
+
+    linprob = LinearProblem(
+        I - Qab[non_dest_origin_mask,non_dest_origin_mask],
+        ones(Float32, n_origin_states) +
+        Rab[non_dest_origin_mask,:]*tba[non_orig_dest_mask])
+    if solver === nothing
+        r = solve(linprob, default_solver()).u
+    else
+        r = solve(linprob, solver()).u
+    end
+
+    return r
 end
 
 end # module Stepwell
