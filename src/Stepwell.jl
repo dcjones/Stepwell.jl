@@ -59,7 +59,7 @@ function CellularNeighborhoodGraph(xs::Vector{Float64}, ys::Vector{Float64})
     delgraph = get_graph(tri)
     ind1 = Int[]
     ind2 = Int[]
-    for (i, j) in get_edges(delgraph)
+    for (i, j) in DelaunayTriangulation.get_edges(delgraph)
         if i != j && i > 0 && j > 0
             push!(ind1, i)
             push!(ind2, j)
