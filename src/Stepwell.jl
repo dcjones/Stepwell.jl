@@ -56,7 +56,6 @@ function CellularNeighborhoodGraph(xs::Vector{Float64}, ys::Vector{Float64})
     ys .-= ymin
     ys ./= ymax - ymin
 
-    println("Computing Delaunay triangulation...")
     tri = triangulate(collect(zip(xs, ys)))
     delgraph = get_graph(tri)
     ind1 = Int[]
@@ -67,7 +66,6 @@ function CellularNeighborhoodGraph(xs::Vector{Float64}, ys::Vector{Float64})
             push!(ind2, j)
         end
     end
-    println("Done.")
 
     A = adjacency_matrix(n, ind1, ind2)
 
@@ -339,25 +337,23 @@ function expected_roundtrip_time(
         return fill(Inf32, n_origin_states)
     end
 
-    Qab, Rab = transition_matrices(ncells, senders, receivers, destination_states)
-    Qba, Rba = transition_matrices(ncells, senders, receivers, origin_states)
+    Qb, Rb = transition_matrices(ncells, senders, receivers, destination_states)
+    Qa, Ra = transition_matrices(ncells, senders, receivers, origin_states)
 
-    tba = expected_absorption_time_from_q(Qba, solver=solver)
-
-    non_dest_origin_mask = origin_states[.!destination_states]
-    non_orig_dest_mask = destination_states[.!origin_states]
+    ta = expected_absorption_time_from_q(Qa, solver=solver) # [ncells - n_origin_states]
+    tba = ta[destination_states[.!origin_states]]
 
     linprob = LinearProblem(
-        I - Qab[non_dest_origin_mask,non_dest_origin_mask],
-        ones(Float32, n_origin_states) +
-        Rab[non_dest_origin_mask,:]*tba[non_orig_dest_mask])
+        I - Qb,
+        ones(Float64, ncells - n_destination_states) + Rb*tba)
     if solver === nothing
-        r = solve(linprob, default_solver()).u
+        r_ba = solve(linprob, default_solver()).u
     else
-        r = solve(linprob, solver()).u
+        r_ba = solve(linprob, solver()).u
     end
 
-    return r
+    r_aba = r_ba[origin_states[.!destination_states]]
+    return r_aba
 end
 
 end # module Stepwell
